@@ -6,6 +6,13 @@ from app.schemas.auth import LoginRequest, OTPVerificationRequest, LoginResponse
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
+@router.post("/send-otp")
+def send_otp(request: LoginRequest, db: Session = Depends(get_db)):
+    try:
+        return AuthService.initiate_login(request.phone_number, db)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     try:
