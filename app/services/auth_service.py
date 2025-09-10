@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-from models import User, OTPVerification, UserToken
-from core.security import generate_otp, create_jwt
-from services.otp_service import OTPService
-from config import OTP_EXPIRATION_MINUTES, JWT_EXPIRATION_MINUTES
+from app.models import User, OTPVerification, UserToken
+from app.core.security import generate_otp, create_jwt
+from app.services.otp_service import OTPService
+from app.config import OTP_EXPIRATION_MINUTES, JWT_EXPIRATION_MINUTES
 
 class AuthService:
     @staticmethod

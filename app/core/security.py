@@ -1,7 +1,7 @@
 import jwt
 import random
 from datetime import datetime, timedelta
-from config import JWT_SECRET, JWT_EXPIRATION_MINUTES
+from app.config import JWT_SECRET, JWT_EXPIRATION_MINUTES
 
 def generate_otp():
     return f"{random.randint(100000, 999999)}"
