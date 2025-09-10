@@ -1,10 +1,8 @@
-from config import JWT_SECRET, JWT_EXPIRATION_MINUTES, OTP_EXPIRATION_MINUTES
-from datetime import datetime, timedelta
 import jwt
 import random
+from datetime import datetime, timedelta
+from config import JWT_SECRET, JWT_EXPIRATION_MINUTES
 
-
-# ---------------- JWT Helpers ----------------
 def generate_otp():
     return f"{random.randint(100000, 999999)}"
 
