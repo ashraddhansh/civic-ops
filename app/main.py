@@ -25,7 +25,7 @@ client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 def send_otp_sms(phone_number: str, otp: str):
     # For trial/testing, ensure recipient number is verified
     message = client.messages.create(
-        body=f"Your OTP for citizen-app is {otp}",
+        body=f"Your OTP is {otp}",
         from_=TWILIO_PHONE_NUMBER,
         to=phone_number
     )
