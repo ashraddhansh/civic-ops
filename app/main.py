@@ -2,9 +2,10 @@ from fastapi import FastAPI, HTTPException, Depends, Header
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import User, OTPVerification, UserToken, Issue
-from config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, JWT_SECRET, JWT_EXPIRATION_MINUTES, OTP_EXPIRATION_MINUTES
+from config import JWT_SECRET, JWT_EXPIRATION_MINUTES, OTP_EXPIRATION_MINUTES
+from helpers import twilio_helper
+from helpers import jwt_helper
 
-from twilio.rest import Client
 from datetime import datetime, timedelta
 import random
 import jwt
@@ -19,17 +20,6 @@ def get_db():
     finally:
         db.close()
 
-# ---------------- Twilio Helper ----------------
-client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-def send_otp_sms(phone_number: str, otp: str):
-    # For trial/testing, ensure recipient number is verified
-    message = client.messages.create(
-        body=f"Your OTP is {otp}",
-        from_=TWILIO_PHONE_NUMBER,
-        to=phone_number
-    )
-    return message.sid
 
 # ---------------- JWT Helpers ----------------
 def generate_otp():
@@ -69,7 +59,7 @@ def login(phone_number: str, db: Session = Depends(get_db)):
     db.commit()
 
     # Send OTP via Twilio
-    send_otp_sms(phone_number, otp)
+    twilio_helper.send_otp_sms(phone_number, otp)
     return {"message": "OTP sent successfully"}
 
 @app.post("/verify-otp")
@@ -89,7 +79,7 @@ def verify_otp(phone_number: str, otp: str, name: str = None, db: Session = Depe
         db.refresh(user)
 
     # Generate JWT token
-    token = create_jwt(user.user_id)
+    token = jwt_helper.create_jwt(user.user_id)
 
     # Save token for logout
     expires_at = datetime.utcnow() + timedelta(minutes=JWT_EXPIRATION_MINUTES)
