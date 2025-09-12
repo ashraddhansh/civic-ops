@@ -1,10 +1,10 @@
 from fastapi import Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from database import SessionLocal
-from models import User, UserToken
-from core.security import verify_jwt
+from app.database import SessionLocal
+from app.models import User, UserToken
+from app.core.security import verify_jwt
 import jwt
-from config import JWT_SECRET
+from app.config import JWT_SECRET
 
 def get_db():
     db = SessionLocal()
