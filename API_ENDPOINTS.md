@@ -1,6 +1,6 @@
 # Authentication Endpoints Documentation
 
-## Base URL: http://localhost:8000
+## Base URL: https://civic-ops.onrender.com
 
 ---
 

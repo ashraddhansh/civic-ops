@@ -38,7 +38,7 @@ class Issue(Base):
 class OTPVerification(Base):
     __tablename__ = "otp_verifications"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     phone_number = Column(String(15), nullable=True)
     email = Column(String(255), nullable=True)
     otp = Column(String(6), nullable=False)
