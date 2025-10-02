@@ -137,13 +137,37 @@ async def get_my_issues(
 
 @router.get("/issues/{issue_id}")
 async def get_issue(
-    issue_id: int,
+    issue_id: str,  # Changed to str to handle both numeric IDs and custom CIV IDs
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get specific issue with fresh presigned URL"""
+    """
+    Get specific issue details with fresh presigned URLs
+    
+    Args:
+        issue_id: Can be either numeric issue_id or custom_id (CIV format)
+    """
     try:
-        issue = db.query(Issue).filter_by(issue_id=issue_id, user_id=current_user.user_id).first()
+        # Try to find issue by custom_id first, then by issue_id
+        issue = None
+        
+        # If it starts with CIV, search by custom_id
+        if issue_id.startswith('CIV'):
+            issue = db.query(Issue).filter_by(
+                custom_id=issue_id, 
+                user_id=current_user.user_id
+            ).first()
+        else:
+            # Try to parse as numeric issue_id
+            try:
+                numeric_id = int(issue_id)
+                issue = db.query(Issue).filter_by(
+                    issue_id=numeric_id, 
+                    user_id=current_user.user_id
+                ).first()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid issue ID format")
+        
         if not issue:
             raise HTTPException(status_code=404, detail="Issue not found")
         
@@ -182,15 +206,11 @@ async def get_issue(
                     "title": issue.title,
                     "category": issue.category,
                     "subcategory": issue.subcategory or "",
-                    "description": issue.description,
                     "status": issue.status,
                     "location": {
-                        "latitude": issue.latitude,
-                        "longitude": issue.longitude,
                         "address": issue.location or "Location not specified"
                     },
                     "image_url": image_url,      # Fresh presigned URL
-                    "voice_note_url": voice_note_url,  # Fresh presigned URL
                     "created_at": issue.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                     "updated_at": issue.updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ") if issue.updated_at else None
                 }
