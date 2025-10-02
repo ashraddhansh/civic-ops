@@ -20,16 +20,18 @@ class Issue(Base):
     __tablename__ = "issues"
 
     issue_id = Column(Integer, primary_key=True, index=True)
+    custom_id = Column(String(50), unique=True, nullable=True)  # CIV + timestamp format
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"))
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
-    category = Column(String(50), nullable=False)  # e.g., "road", "water", "electricity", "waste"
+    category = Column(String(50), nullable=False)  # e.g., "Road & Transport"
+    subcategory = Column(String(50), nullable=True)  # e.g., "Potholes"
     location = Column(String(500))  # Address or description
     latitude = Column(Float, nullable=True)  # GPS coordinates
     longitude = Column(Float, nullable=True)
-    photo_url = Column(String(255))
-    voice_note_url = Column(String(255))
-    status = Column(String(20), default="pending")  # pending, in_progress, resolved, rejected
+    photo_url = Column(String(1000))
+    voice_note_url = Column(String(1000))
+    status = Column(String(20), default="reported")  # reported, in_progress, resolved, rejected
     priority = Column(String(10), default="unassigned")  # unassigned, low, medium, high, urgent (admin-only)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

@@ -2,6 +2,30 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
+# Enhanced schemas for new API
+class LocationData(BaseModel):
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    address: str
+
+class EnhancedIssueCreate(BaseModel):
+    title: Optional[str] = None  # Will be auto-generated if not provided
+    category: str = Field(..., description="Main category like 'Road & Transport'")
+    subcategory: str = Field(..., description="Subcategory like 'Potholes'")
+    description: str = Field(..., min_length=10, description="Detailed description")
+    location: LocationData
+
+class ReportedBy(BaseModel):
+    id: str
+    name: str
+    phone: str
+
+class EnhancedIssueResponse(BaseModel):
+    success: bool
+    message: str
+    data: dict
+
+# Keep existing schemas for backward compatibility
 class IssueCreate(BaseModel):
     title: str = Field(..., min_length=5, max_length=200, description="Brief title of the issue")
     description: str = Field(..., min_length=10, description="Detailed description of the issue")

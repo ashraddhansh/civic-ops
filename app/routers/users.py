@@ -2,9 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.core.dependencies import get_db, get_current_user
 from app.models import User, Issue
-from app.schemas.issues import IssueCreate, IssueResponse, IssueListResponse
+from app.schemas.issues import (
+    IssueResponse, IssueListResponse,
+    EnhancedIssueCreate, EnhancedIssueResponse
+)
 from app.services.s3_service import s3_service
+from app.utils.file_utils import validate_image_file, validate_file_size, get_file_info
 from typing import List, Optional
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -12,35 +20,6 @@ router = APIRouter(prefix="/users", tags=["users"])
 def my_issues(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     issues = db.query(Issue).filter_by(user_id=current_user.user_id).order_by(Issue.created_at.desc()).all()
     return issues
-
-@router.post("/issues", response_model=IssueResponse)
-def create_issue(
-    issue_data: IssueCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    # Validate category
-    valid_categories = ["road", "water", "electricity", "waste", "public_safety", "infrastructure", "other"]
-    if issue_data.category not in valid_categories:
-        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}")
-    
-    # Create new issue (priority will be set to default "unassigned")
-    new_issue = Issue(
-        user_id=current_user.user_id,
-        title=issue_data.title,
-        description=issue_data.description,
-        category=issue_data.category,
-        location=issue_data.location,
-        latitude=issue_data.latitude,
-        longitude=issue_data.longitude
-        # priority defaults to "unassigned" in the model
-    )
-    
-    db.add(new_issue)
-    db.commit()
-    db.refresh(new_issue)
-    
-    return new_issue
 
 @router.get("/issues/{issue_id}", response_model=IssueResponse)
 def get_issue(
@@ -53,73 +32,6 @@ def get_issue(
         raise HTTPException(status_code=404, detail="Issue not found")
     
     return issue
-
-@router.post("/issues/with-files", response_model=IssueResponse)
-async def create_issue_with_files(
-    title: str = Form(...),
-    description: str = Form(...),
-    category: str = Form(...),
-    location: Optional[str] = Form(None),
-    latitude: Optional[float] = Form(None),
-    longitude: Optional[float] = Form(None),
-    photo: Optional[UploadFile] = File(None),
-    voice_note: Optional[UploadFile] = File(None),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Create issue with optional file uploads"""
-    
-    # Validate category
-    valid_categories = ["road", "water", "electricity", "waste", "public_safety", "infrastructure", "other"]
-    if category not in valid_categories:
-        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}")
-    
-    # Validate form data
-    if len(title) < 5 or len(title) > 200:
-        raise HTTPException(status_code=400, detail="Title must be between 5 and 200 characters")
-    if len(description) < 10:
-        raise HTTPException(status_code=400, detail="Description must be at least 10 characters")
-    
-    photo_url = None
-    voice_note_url = None
-    
-    try:
-        # Upload photo if provided
-        if photo:
-            photo_url = await s3_service.upload_file(photo, "image")
-        
-        # Upload voice note if provided
-        if voice_note:
-            voice_note_url = await s3_service.upload_file(voice_note, "audio")
-        
-        # Create new issue
-        new_issue = Issue(
-            user_id=current_user.user_id,
-            title=title,
-            description=description,
-            category=category,
-            location=location,
-            latitude=latitude,
-            longitude=longitude,
-            photo_url=photo_url,
-            voice_note_url=voice_note_url
-        )
-        
-        db.add(new_issue)
-        db.commit()
-        db.refresh(new_issue)
-        
-        return new_issue
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Clean up uploaded files if issue creation fails
-        if photo_url:
-            s3_service.delete_file(photo_url)
-        if voice_note_url:
-            s3_service.delete_file(voice_note_url)
-        raise HTTPException(status_code=500, detail="Failed to create issue")
 
 @router.patch("/issues/{issue_id}/upload-photo")
 async def upload_photo_to_issue(
@@ -184,3 +96,118 @@ async def upload_voice_to_issue(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to upload voice note")
+
+# Enhanced Issue Creation Endpoint
+@router.post("/issues/create", response_model=EnhancedIssueResponse)
+async def create_enhanced_issue(
+    # Form data for JSON fields
+    category: str = Form(..., description="Main category like 'Road & Transport'"),
+    subcategory: str = Form(..., description="Subcategory like 'Potholes'"),
+    description: str = Form(..., min_length=10, description="Detailed description"),
+    latitude: float = Form(..., ge=-90, le=90, description="GPS latitude"),
+    longitude: float = Form(..., ge=-180, le=180, description="GPS longitude"),
+    address: str = Form(..., description="Full address"),
+    title: Optional[str] = Form(None, description="Custom title (auto-generated if not provided)"),
+    
+    # File upload
+    image: Optional[UploadFile] = File(None, description="Issue image"),
+    
+    # Dependencies
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new issue with enhanced features:
+    - Custom issue ID format (CIV + timestamp)
+    - Auto-generated titles from category + subcategory
+    - S3 image upload
+    - Structured response with user details
+    """
+    try:
+        logger.info(f"Creating issue for user {current_user.user_id}")
+        
+        # Generate custom issue ID
+        timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+        custom_id = f"CIV{timestamp}"
+        
+        # Auto-generate title if not provided
+        if not title:
+            title = f"{subcategory} - {category}"
+        
+        # Handle image upload to S3
+        image_url = None
+        if image:
+            logger.info(f"Processing image upload: {get_file_info(image)}")
+            
+            # Validate image file
+            validate_image_file(image)
+            await validate_file_size(image)
+            
+            # Upload to S3
+            image_url = await s3_service.upload_file(image, folder="issues")
+            logger.info(f"Image uploaded to S3: {image_url}")
+        
+        # Create issue in database
+        new_issue = Issue(
+            custom_id=custom_id,
+            user_id=current_user.user_id,
+            title=title,
+            category=category,
+            subcategory=subcategory,
+            description=description,
+            location=address,
+            latitude=latitude,
+            longitude=longitude,
+            photo_url=image_url,
+            status="reported"
+        )
+        
+        db.add(new_issue)
+        db.commit()
+        db.refresh(new_issue)
+        
+        logger.info(f"Issue created successfully with ID: {custom_id}")
+        
+        # Build structured response
+        response_data = {
+            "issue": {
+                "id": custom_id,
+                "title": title,
+                "category": category,
+                "subcategory": subcategory,
+                "description": description,
+                "status": "reported",
+                "location": {
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "address": address
+                },
+                "image_url": image_url,
+                "reported_by": {
+                    "id": current_user.id,
+                    "name": current_user.full_name or current_user.name,
+                    "phone": current_user.phone_number
+                },
+                "created_at": new_issue.created_at.isoformat() + "Z"
+            }
+        }
+        
+        return {
+            "success": True,
+            "message": "Issue submitted successfully",
+            "data": response_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Rollback database transaction
+        db.rollback()
+        
+        # Clean up uploaded file if issue creation fails
+        if image_url:
+            logger.warning(f"Cleaning up uploaded file due to error: {image_url}")
+            s3_service.delete_file(image_url)
+        
+        logger.error(f"Error creating issue: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create issue: {str(e)}")

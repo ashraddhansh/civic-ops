@@ -315,3 +315,115 @@ Authorization: Bearer <access_token>
 - Refresh tokens expire in 30 days
 - OTP expires in 5 minutes
 - All timestamps are in ISO 8601 format with 'Z' suffix (UTC)
+
+---
+
+# Issue Management Endpoints
+
+## 7. Create Issue (Enhanced)
+**Endpoint:** `POST /users/issues/create`
+
+**Request Headers:**
+```
+Content-Type: multipart/form-data
+Authorization: Bearer <access_token>
+```
+
+**Request Body (multipart/form-data):**
+```
+category: "Road & Transport"              // Form field
+subcategory: "Potholes"                   // Form field
+description: "Large pothole causing..."   // Form field
+latitude: 28.6139                         // Form field
+longitude: 77.2090                        // Form field
+address: "123 Main Street, New Delhi"     // Form field
+title: "Custom Title"                     // Form field (optional)
+image: <image_file>                       // File upload (optional)
+```
+
+**Example using curl:**
+```bash
+curl -X POST "https://civic-ops.onrender.com/users/issues/create" \
+  -H "Authorization: Bearer <access_token>" \
+  -F "category=Road & Transport" \
+  -F "subcategory=Potholes" \
+  -F "description=Large pothole causing damage to vehicles" \
+  -F "latitude=28.6139" \
+  -F "longitude=77.2090" \
+  -F "address=123 Main Street, New Delhi, India" \
+  -F "image=@/path/to/image.jpg"
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Issue submitted successfully",
+  "data": {
+    "issue": {
+      "id": "CIV1696234567890",
+      "title": "Pothole - Road Issues",
+      "category": "Road & Transport",
+      "subcategory": "Potholes",
+      "description": "Large pothole causing damage...",
+      "status": "reported",
+      "location": {
+        "latitude": 28.6139,
+        "longitude": 77.2090,
+        "address": "123 Main Street, New Delhi, India"
+      },
+      "image_url": "https://s3.bucket.com/issues/image123.jpg",
+      "reported_by": {
+        "id": "user-uuid",
+        "name": "Arpit Shraddhansh",
+        "phone": "+919369624516"
+      },
+      "created_at": "2025-10-02T10:30:00Z"
+    }
+  }
+}
+```
+
+**Response (401 Unauthorized):**
+```json
+{
+  "detail": "Invalid token"
+}
+```
+
+---
+
+## 8. Get My Issues
+**Endpoint:** `GET /users/my-issues`
+
+**Request Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Response (200 OK):**
+```json
+[
+  {
+    "issue_id": 1,
+    "title": "Pothole - Road Issues",
+    "category": "Road & Transport",
+    "status": "reported",
+    "priority": "unassigned",
+    "created_at": "2025-10-02T10:30:00Z",
+    "location": "123 Main Street, New Delhi, India"
+  }
+]
+```
+
+---
+
+## Backward Compatibility
+
+The following legacy endpoints are still available:
+
+- `POST /users/issues` - Original issue creation
+- `POST /users/issues/with-files` - Issue creation with file uploads
+- `GET /users/issues/{issue_id}` - Get specific issue
+- `PATCH /users/issues/{issue_id}/upload-photo` - Upload photo to existing issue
+- `PATCH /users/issues/{issue_id}/upload-voice` - Upload voice note to existing issue

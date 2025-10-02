@@ -1,6 +1,8 @@
 import boto3
 import uuid
 import mimetypes
+import json
+from datetime import datetime
 from botocore.exceptions import ClientError, NoCredentialsError
 from fastapi import HTTPException, UploadFile
 from app.config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET_NAME, S3_BASE_URL
@@ -26,12 +28,8 @@ class S3Service:
 
     def validate_file(self, file: UploadFile, file_type: str = "image") -> bool:
         """Validate file size and type"""
-        # Check file size
-        if file.size and file.size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Maximum size is {MAX_FILE_SIZE / (1024*1024):.1f}MB"
-            )
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file provided")
         
         # Check file type
         if file_type == "image":
@@ -49,41 +47,69 @@ class S3Service:
         
         return True
 
-    def generate_file_key(self, file: UploadFile, prefix: str = "uploads") -> str:
-        """Generate unique file key for S3"""
-        file_extension = file.filename.split('.')[-1] if '.' in file.filename else ''
-        unique_id = str(uuid.uuid4())
-        return f"{prefix}/{unique_id}.{file_extension}"
+    async def validate_file_size(self, file: UploadFile) -> None:
+        """Validate file size by reading content"""
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
+            )
+        
+        # Reset file pointer
+        await file.seek(0)
 
-    async def upload_file(self, file: UploadFile, file_type: str = "image") -> str:
-        """Upload file to S3 and return public URL"""
+    def generate_file_key(self, file: UploadFile, folder: str = "uploads") -> str:
+        """Generate unique file key for S3 with timestamp"""
+        file_extension = file.filename.split('.')[-1].lower() if '.' in file.filename else 'bin'
+        timestamp = int(datetime.utcnow().timestamp())
+        unique_id = str(uuid.uuid4().hex)[:8]  # Short unique ID
+        return f"{folder}/{timestamp}_{unique_id}.{file_extension}"
+
+    async def upload_file(self, file: UploadFile, folder: str = "issues") -> str:
+        """Upload file to S3 and return pre-signed URL"""
         try:
-            # Validate file
+            # Determine file type based on content type
+            if file.content_type.startswith('image/'):
+                file_type = "image"
+            elif file.content_type.startswith('audio/'):
+                file_type = "audio"
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported file type")
+            
+            # Validate file type and content
             self.validate_file(file, file_type)
+            await self.validate_file_size(file)
             
             # Generate unique key
-            if file_type == "image":
-                key = self.generate_file_key(file, "images")
-            elif file_type == "audio":
-                key = self.generate_file_key(file, "audio")
-            else:
-                key = self.generate_file_key(file, "files")
+            key = self.generate_file_key(file, folder)
             
             # Read file content
             file_content = await file.read()
             
-            # Upload to S3
+            # Reset file pointer for potential reuse
+            await file.seek(0)
+            
+            # Upload to S3 without ACL
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=key,
                 Body=file_content,
-                ContentType=file.content_type
-                # ACL removed - bucket should be configured for public access via bucket policy
+                ContentType=file.content_type,
+                Metadata={
+                    'original-filename': file.filename,
+                    'upload-timestamp': str(int(datetime.utcnow().timestamp()))
+                }
             )
             
-            # Return public URL
-            file_url = f"{self.base_url}/{key}"
-            logger.info(f"File uploaded successfully: {file_url}")
+            # Generate pre-signed URL for public access (valid for 1 year)
+            file_url = self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': key},
+                ExpiresIn=31536000  # 1 year in seconds
+            )
+            
+            logger.info(f"File uploaded successfully: {key}")
             return file_url
             
         except HTTPException:
@@ -92,8 +118,9 @@ class S3Service:
             logger.error("AWS credentials not found")
             raise HTTPException(status_code=500, detail="AWS credentials not configured")
         except ClientError as e:
-            logger.error(f"AWS S3 error: {e}")
-            raise HTTPException(status_code=500, detail="Failed to upload file to S3")
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            logger.error(f"AWS S3 error ({error_code}): {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to upload file to S3: {error_code}")
         except Exception as e:
             logger.error(f"Unexpected error during file upload: {e}")
             raise HTTPException(status_code=500, detail="File upload failed")
@@ -128,6 +155,39 @@ class S3Service:
             self.s3_client.head_bucket(Bucket=self.bucket_name)
             return True
         except ClientError:
+            return False
+
+    def configure_bucket_for_public_access(self) -> bool:
+        """Configure bucket policy for public read access"""
+        try:
+            # Bucket policy for public read access
+            bucket_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "PublicReadGetObject",
+                        "Effect": "Allow",
+                        "Principal": "*",
+                        "Action": "s3:GetObject",
+                        "Resource": f"arn:aws:s3:::{self.bucket_name}/*"
+                    }
+                ]
+            }
+            
+            # Apply bucket policy
+            self.s3_client.put_bucket_policy(
+                Bucket=self.bucket_name,
+                Policy=json.dumps(bucket_policy)
+            )
+            
+            logger.info(f"Bucket policy applied for public access: {self.bucket_name}")
+            return True
+            
+        except ClientError as e:
+            logger.error(f"Failed to configure bucket policy: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error configuring bucket: {e}")
             return False
 
 # Create global instance
