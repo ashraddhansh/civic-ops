@@ -206,6 +206,7 @@ async def get_issue(
                     "title": issue.title,
                     "category": issue.category,
                     "subcategory": issue.subcategory or "",
+                    "description": issue.description,
                     "status": issue.status,
                     "location": {
                         "address": issue.location or "Location not specified"
