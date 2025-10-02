@@ -67,7 +67,7 @@ class S3Service:
         return f"{folder}/{timestamp}_{unique_id}.{file_extension}"
 
     async def upload_file(self, file: UploadFile, folder: str = "issues") -> str:
-        """Upload file to S3 and return pre-signed URL"""
+        """Upload file to S3 and return S3 key (not presigned URL)"""
         try:
             # Determine file type based on content type
             if file.content_type.startswith('image/'):
@@ -90,7 +90,7 @@ class S3Service:
             # Reset file pointer for potential reuse
             await file.seek(0)
             
-            # Upload to S3 without ACL
+            # Upload to S3 without ACL (private bucket)
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=key,
@@ -102,15 +102,9 @@ class S3Service:
                 }
             )
             
-            # Generate pre-signed URL for public access (valid for 1 year)
-            file_url = self.s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': self.bucket_name, 'Key': key},
-                ExpiresIn=31536000  # 1 year in seconds
-            )
-            
             logger.info(f"File uploaded successfully: {key}")
-            return file_url
+            # Return S3 key instead of presigned URL
+            return key
             
         except HTTPException:
             raise
@@ -125,22 +119,50 @@ class S3Service:
             logger.error(f"Unexpected error during file upload: {e}")
             raise HTTPException(status_code=500, detail="File upload failed")
 
-    def delete_file(self, file_url: str) -> bool:
-        """Delete file from S3 using its URL"""
+    def generate_presigned_url(self, s3_key: str, expiration: int = 14400) -> str:
+        """
+        Generate a presigned URL for private S3 object
+        
+        Args:
+            s3_key: S3 object key (path to file in bucket)
+            expiration: URL expiration time in seconds (default: 4 hours)
+        
+        Returns:
+            Presigned URL that expires after specified time
+        """
         try:
-            # Extract key from URL
-            if self.base_url in file_url:
-                key = file_url.replace(f"{self.base_url}/", "")
-                
-                self.s3_client.delete_object(
-                    Bucket=self.bucket_name,
-                    Key=key
-                )
-                logger.info(f"File deleted successfully: {key}")
-                return True
-            else:
-                logger.warning(f"Invalid file URL for deletion: {file_url}")
-                return False
+            presigned_url = self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': s3_key},
+                ExpiresIn=expiration
+            )
+            return presigned_url
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL for {s3_key}: {str(e)}")
+            return None
+            
+        except HTTPException:
+            raise
+        except NoCredentialsError:
+            logger.error("AWS credentials not found")
+            raise HTTPException(status_code=500, detail="AWS credentials not configured")
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            logger.error(f"AWS S3 error ({error_code}): {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to upload file to S3: {error_code}")
+        except Exception as e:
+            logger.error(f"Unexpected error during file upload: {e}")
+            raise HTTPException(status_code=500, detail="File upload failed")
+
+    def delete_file(self, s3_key: str) -> bool:
+        """Delete file from S3 using its S3 key"""
+        try:
+            self.s3_client.delete_object(
+                Bucket=self.bucket_name,
+                Key=s3_key
+            )
+            logger.info(f"File deleted successfully: {s3_key}")
+            return True
                 
         except ClientError as e:
             logger.error(f"Failed to delete file from S3: {e}")
