@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
 from app.core.dependencies import get_db, get_current_user
 from app.models import User, Issue
 from app.schemas.issues import (
@@ -16,10 +17,78 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-@router.get("/my-issues", response_model=List[IssueListResponse])
-def my_issues(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    issues = db.query(Issue).filter_by(user_id=current_user.user_id).order_by(Issue.created_at.desc()).all()
-    return issues
+@router.get("/my-issues")
+async def get_my_issues(
+    page: int = Query(1, ge=1, description="Page number (starts from 1)"),
+    limit: int = Query(20, ge=1, le=100, description="Number of issues per page"),
+    status: Optional[str] = Query(None, description="Filter by status (reported, in_progress, resolved, etc.)"),
+    category: Optional[str] = Query(None, description="Filter by category"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get paginated list of issues reported by the current user
+    
+    Query Parameters:
+    - page: Page number (default: 1)
+    - limit: Items per page (default: 20, max: 100)
+    - status: Filter by issue status (optional)
+    - category: Filter by issue category (optional)
+    """
+    try:
+        # Calculate offset for pagination
+        offset = (page - 1) * limit
+        
+        # Build query with filters
+        query = db.query(Issue).filter(Issue.user_id == current_user.user_id)
+        
+        # Apply filters if provided
+        if status:
+            query = query.filter(Issue.status == status)
+        
+        if category:
+            query = query.filter(Issue.category == category)
+        
+        # Get total count for pagination
+        total = query.count()
+        
+        # Get issues with pagination, ordered by created_at desc (newest first)
+        issues = query.order_by(desc(Issue.created_at)).offset(offset).limit(limit).all()
+        
+        # Format response data
+        formatted_issues = []
+        for issue in issues:
+            formatted_issue = {
+                "id": issue.custom_id if issue.custom_id else str(issue.issue_id),
+                "title": issue.title,
+                "category": issue.category,
+                "subcategory": issue.subcategory or "",
+                "status": issue.status,
+                "location": {
+                    "address": issue.location or "Location not specified"
+                },
+                "image_url": issue.photo_url,
+                "created_at": issue.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            }
+            formatted_issues.append(formatted_issue)
+        
+        # Build response
+        response_data = {
+            "success": True,
+            "message": "Issues retrieved successfully",
+            "data": {
+                "issues": formatted_issues,
+                "total": total,
+                "page": page,
+                "limit": limit
+            }
+        }
+        
+        return response_data
+        
+    except Exception as e:
+        logger.error(f"Error fetching user issues: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch issues")
 
 @router.get("/issues/{issue_id}", response_model=IssueResponse)
 def get_issue(
