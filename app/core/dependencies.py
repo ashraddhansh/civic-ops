@@ -15,7 +15,7 @@ def get_db():
 
 def get_current_user(authorization: str = Header(...), db: Session = Depends(get_db)):
     token = authorization.replace("Bearer ", "")
-    db_token = db.query(UserToken).filter_by(token=token).first()
+    db_token = db.query(UserToken).filter_by(access_token=token).first()
     if not db_token:
         raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -32,3 +32,13 @@ def get_current_user(authorization: str = Header(...), db: Session = Depends(get
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+def get_current_user_optional(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Get current user but don't raise error if not authenticated"""
+    if not authorization:
+        return None
+        
+    try:
+        return get_current_user(authorization, db)
+    except HTTPException:
+        return None
