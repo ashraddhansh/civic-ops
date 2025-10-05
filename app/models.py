@@ -1,7 +1,9 @@
-from sqlalchemy import Column, Integer, String, TIMESTAMP, ForeignKey, Text, Float, Boolean
+from sqlalchemy import Column, Integer, String, TIMESTAMP, ForeignKey, Text, Float, Boolean, DateTime
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.database import Base
 import uuid
+from datetime import datetime
 
 class User(Base):
     __tablename__ = "users"
@@ -33,8 +35,12 @@ class Issue(Base):
     voice_note_url = Column(String(1000))
     status = Column(String(20), default="reported")  # reported, in_progress, resolved, rejected
     priority = Column(String(10), default="unassigned")  # unassigned, low, medium, high, urgent (admin-only)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    department = relationship("Department", back_populates="issues")
 
 
 class OTPVerification(Base):
@@ -59,3 +65,38 @@ class UserToken(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     expires_at = Column(TIMESTAMP, nullable=False)
     refresh_expires_at = Column(TIMESTAMP, nullable=True)
+
+
+class Department(Base):
+    __tablename__ = "departments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)  # e.g., "Solid waste management"
+    code = Column(String(20), unique=True, nullable=False)   # e.g., "SWM"
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    admins = relationship("AdminUser", back_populates="department")
+    issues = relationship("Issue", back_populates="department")
+
+
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False)
+    email = Column(String(100), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(100), nullable=False)
+    role = Column(String(50), default="admin")  # admin, super_admin
+    department_id = Column(Integer, ForeignKey("departments.id"))
+    is_active = Column(Boolean, default=True)
+    last_login = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    department = relationship("Department", back_populates="admins")
