@@ -172,6 +172,163 @@ async def get_department_issues(
         logger.error(f"Error fetching department issues: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch issues")
 
+@router.get("/issues/locations")
+async def get_department_issue_locations(
+    status: Optional[str] = Query(None, description="Filter by status (reported, in_progress, resolved, etc.)"),
+    priority: Optional[str] = Query(None, description="Filter by priority (unassigned, low, medium, high, urgent)"),
+    category: Optional[str] = Query(None, description="Filter by category"),
+    current_admin: AdminUser = Depends(get_department_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get latitude and longitude coordinates of all issues for admin's department
+    This endpoint is designed for plotting issues on maps/graphs
+    """
+    try:
+        # Base query for department issues with coordinates
+        query = db.query(Issue).filter(
+            Issue.department_id == current_admin.department_id,
+            Issue.latitude.isnot(None),  # Only include issues with coordinates
+            Issue.longitude.isnot(None)
+        )
+        
+        # Apply filters if provided
+        if status:
+            query = query.filter(Issue.status == status)
+        if priority:
+            query = query.filter(Issue.priority == priority)
+        if category:
+            query = query.filter(Issue.category == category)
+        
+        # Get all matching issues
+        issues = query.order_by(Issue.created_at.desc()).all()
+        
+        # Format response for map plotting
+        issue_locations = []
+        for issue in issues:
+            # Get user info for popup details
+            user = db.query(User).filter(User.user_id == issue.user_id).first()
+            
+            location_data = {
+                "issue_id": issue.custom_id if issue.custom_id else str(issue.issue_id),
+                "latitude": float(issue.latitude),
+                "longitude": float(issue.longitude),
+                "title": issue.title,
+                "category": issue.category,
+                "subcategory": issue.subcategory or "",
+                "status": issue.status,
+                "priority": issue.priority or "unassigned",
+                "address": issue.location or "Address not specified",
+                "reported_by": user.full_name if user else "Unknown User",
+                "reporter_phone": user.phone_number if user else "N/A",
+                "created_at": issue.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "description": issue.description[:100] + "..." if len(issue.description) > 100 else issue.description  # Truncated for map popup
+            }
+            issue_locations.append(location_data)
+        
+        # Get department info
+        department = db.query(Department).filter(Department.id == current_admin.department_id).first()
+        
+        # Calculate some statistics
+        total_issues = len(issue_locations)
+        status_counts = {}
+        priority_counts = {}
+        
+        for issue in issue_locations:
+            # Count by status
+            status = issue['status']
+            status_counts[status] = status_counts.get(status, 0) + 1
+            
+            # Count by priority
+            priority = issue['priority']
+            priority_counts[priority] = priority_counts.get(priority, 0) + 1
+        
+        return {
+            "success": True,
+            "message": "Issue locations retrieved successfully",
+            "data": {
+                "department": {
+                    "id": department.id,
+                    "name": department.name
+                },
+                "locations": issue_locations,
+                "statistics": {
+                    "total_issues": total_issues,
+                    "status_breakdown": status_counts,
+                    "priority_breakdown": priority_counts
+                },
+                "map_bounds": {
+                    "north": max([loc['latitude'] for loc in issue_locations]) if issue_locations else None,
+                    "south": min([loc['latitude'] for loc in issue_locations]) if issue_locations else None,
+                    "east": max([loc['longitude'] for loc in issue_locations]) if issue_locations else None,
+                    "west": min([loc['longitude'] for loc in issue_locations]) if issue_locations else None
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching issue locations for department {current_admin.department_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch issue locations")
+
+@router.get("/issues/heatmap")
+async def get_department_issue_heatmap(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    days: int = Query(30, ge=1, le=365, description="Number of days to look back (default: 30)"),
+    current_admin: AdminUser = Depends(get_department_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get heatmap data for issues in the department
+    Returns simplified coordinate data for density mapping
+    """
+    try:
+        from datetime import datetime, timedelta
+        
+        # Calculate date range
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+        
+        # Query for heatmap data
+        query = db.query(Issue.latitude, Issue.longitude, Issue.status, Issue.created_at).filter(
+            Issue.department_id == current_admin.department_id,
+            Issue.latitude.isnot(None),
+            Issue.longitude.isnot(None),
+            Issue.created_at >= start_date
+        )
+        
+        if status:
+            query = query.filter(Issue.status == status)
+        
+        issues = query.all()
+        
+        # Format for heatmap (simple lat/lng pairs with weight)
+        heatmap_data = []
+        for issue in issues:
+            heatmap_data.append({
+                "lat": float(issue.latitude),
+                "lng": float(issue.longitude),
+                "weight": 1.0,  # Can be adjusted based on priority or other factors
+                "status": issue.status
+            })
+        
+        return {
+            "success": True,
+            "message": "Heatmap data retrieved successfully",
+            "data": {
+                "heatmap_points": heatmap_data,
+                "total_points": len(heatmap_data),
+                "date_range": {
+                    "start": start_date.strftime("%Y-%m-%d"),
+                    "end": end_date.strftime("%Y-%m-%d"),
+                    "days": days
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating heatmap data: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate heatmap data")
+
 @router.get("/issues/{issue_id}")
 async def get_department_issue(
     issue_id: str,
