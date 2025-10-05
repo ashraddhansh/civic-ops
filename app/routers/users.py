@@ -8,6 +8,7 @@ from app.schemas.issues import (
     EnhancedIssueCreate, EnhancedIssueResponse
 )
 from app.services.s3_service import s3_service
+from app.services.department_routing_service import department_routing_service
 from app.utils.file_utils import validate_image_file, validate_file_size, get_file_info
 from typing import List, Optional
 import time
@@ -323,6 +324,7 @@ async def create_enhanced_issue(
     - Auto-generated titles from category + subcategory
     - S3 image upload
     - Structured response with user details
+    - BACKEND ONLY: Auto-assign to department based on category/subcategory
     """
     try:
         logger.info(f"Creating issue for user {current_user.user_id}")
@@ -334,6 +336,21 @@ async def create_enhanced_issue(
         # Auto-generate title if not provided
         if not title:
             title = f"{subcategory} - {category}"
+        
+        # BACKEND ONLY: Auto-route to department (doesn't affect API response)
+        department_id = None
+        try:
+            department_id = department_routing_service.get_department_for_issue(
+                category=category,
+                subcategory=subcategory,
+                db=db
+            )
+            if department_id:
+                logger.info(f"Issue auto-routed to department ID: {department_id}")
+            else:
+                logger.info(f"No department mapping found, issue will be unassigned")
+        except Exception as e:
+            logger.warning(f"Department routing failed, continuing without assignment: {str(e)}")
         
         # Handle image upload to S3
         image_s3_key = None
@@ -348,7 +365,7 @@ async def create_enhanced_issue(
             image_s3_key = await s3_service.upload_file(image, folder="issues")
             logger.info(f"Image uploaded to S3 with key: {image_s3_key}")
         
-        # Create issue in database (store S3 key, not URL)
+        # Create issue in database with department assignment
         new_issue = Issue(
             custom_id=custom_id,
             user_id=current_user.user_id,
@@ -360,6 +377,7 @@ async def create_enhanced_issue(
             latitude=latitude,
             longitude=longitude,
             photo_url=image_s3_key,  # Store S3 key
+            department_id=department_id,  # AUTO-ASSIGNED: department routing
             status="reported"
         )
         

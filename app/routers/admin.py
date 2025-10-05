@@ -113,28 +113,39 @@ async def get_department_issues(
                 except Exception as e:
                     logger.warning(f"Failed to generate presigned URL: {str(e)}")
             
+            # Generate fresh presigned URL for voice note
+            voice_note_url = None
+            if issue.voice_note_url:
+                try:
+                    if issue.voice_note_url.startswith('https://'):
+                        s3_key = extract_s3_key_from_url(issue.voice_note_url)
+                    else:
+                        s3_key = issue.voice_note_url
+                    voice_note_url = s3_service.generate_presigned_url(s3_key, expiration=14400)
+                except Exception as e:
+                    logger.warning(f"Failed to generate presigned URL for voice note: {str(e)}")
+            
             # Get user info
             user = db.query(User).filter(User.user_id == issue.user_id).first()
             
             formatted_issue = {
-                "id": issue.custom_id if issue.custom_id else str(issue.issue_id),
+                "issue_id": issue.custom_id if issue.custom_id else str(issue.issue_id),
                 "title": issue.title,
+                "description": issue.description,
                 "category": issue.category,
                 "subcategory": issue.subcategory or "",
-                "description": issue.description,
                 "status": issue.status,
                 "priority": issue.priority or "unassigned",
-                "location": {
-                    "latitude": issue.latitude,
-                    "longitude": issue.longitude,
-                    "address": issue.location or "Location not specified"
-                },
+                "address": issue.location or "Location not specified",
+                "latitude": issue.latitude,
+                "longitude": issue.longitude,
                 "image_url": image_url,
-                "voice_note_url": None,  # Will implement if needed
+                "voice_note_url": voice_note_url,
                 "reported_by": {
-                    "id": str(user.user_id) if user else "unknown",
-                    "name": user.full_name if user else "Unknown User",
-                    "phone": user.phone_number if user else "N/A"
+                    "user_id": str(user.user_id) if user else "unknown",
+                    "name": user.full_name or user.name if user else "Unknown User",
+                    "phone_number": user.phone_number if user else "N/A",
+                    "email": user.email if user and user.email else "N/A"
                 },
                 "department_id": issue.department_id,
                 "created_at": issue.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
@@ -205,6 +216,18 @@ async def get_department_issue(
             except Exception as e:
                 logger.warning(f"Failed to generate presigned URL: {str(e)}")
         
+        # Generate fresh presigned URL for voice note
+        voice_note_url = None
+        if issue.voice_note_url:
+            try:
+                if issue.voice_note_url.startswith('https://'):
+                    s3_key = extract_s3_key_from_url(issue.voice_note_url)
+                else:
+                    s3_key = issue.voice_note_url
+                voice_note_url = s3_service.generate_presigned_url(s3_key, expiration=14400)
+            except Exception as e:
+                logger.warning(f"Failed to generate presigned URL for voice note: {str(e)}")
+        
         # Get user info
         user = db.query(User).filter(User.user_id == issue.user_id).first()
         
@@ -213,24 +236,23 @@ async def get_department_issue(
             "message": "Issue retrieved successfully",
             "data": {
                 "issue": {
-                    "id": issue.custom_id if issue.custom_id else str(issue.issue_id),
+                    "issue_id": issue.custom_id if issue.custom_id else str(issue.issue_id),
                     "title": issue.title,
+                    "description": issue.description,
                     "category": issue.category,
                     "subcategory": issue.subcategory or "",
-                    "description": issue.description,
                     "status": issue.status,
                     "priority": issue.priority or "unassigned",
-                    "location": {
-                        "latitude": issue.latitude,
-                        "longitude": issue.longitude,
-                        "address": issue.location or "Location not specified"
-                    },
+                    "address": issue.location or "Location not specified",
+                    "latitude": issue.latitude,
+                    "longitude": issue.longitude,
                     "image_url": image_url,
-                    "voice_note_url": None,
+                    "voice_note_url": voice_note_url,
                     "reported_by": {
-                        "id": str(user.user_id) if user else "unknown",
-                        "name": user.full_name if user else "Unknown User",
-                        "phone": user.phone_number if user else "N/A"
+                        "user_id": str(user.user_id) if user else "unknown",
+                        "name": user.full_name or user.name if user else "Unknown User",
+                        "phone_number": user.phone_number if user else "N/A",
+                        "email": user.email if user and user.email else "N/A"
                     },
                     "department_id": issue.department_id,
                     "created_at": issue.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, TIMESTAMP, ForeignKey, Text, Float, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, TIMESTAMP, ForeignKey, Text, Float, Boolean, DateTime, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -100,3 +100,24 @@ class AdminUser(Base):
     
     # Relationships
     department = relationship("Department", back_populates="admins")
+
+
+class CategoryDepartmentMapping(Base):
+    __tablename__ = "category_department_mappings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String(100), nullable=False, index=True)
+    subcategory = Column(String(100), nullable=False, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    department = relationship("Department")
+    
+    # Ensure unique mapping per category-subcategory
+    __table_args__ = (
+        Index('idx_category_subcategory', 'category', 'subcategory'),
+        UniqueConstraint('category', 'subcategory', name='unique_category_subcategory')
+    )
