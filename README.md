@@ -4,7 +4,7 @@ A backend API for citizens to report civic issues (potholes, drainage, waste man
 
 ## Why This Exists
 
-Managing civic complaints through fragmented channels (WhatsApp, calls, emails) means nothing gets tracked or prioritized. This API lets citizens report issues with location and media, admins see and route them to departments, and there's an audit trail. Nothing fancy—just structured intake and workflow automation.
+Managing civic complaints through fragmented channels (WhatsApp, calls, emails) means nothing gets tracked or prioritized. This API lets citizens report issues with location and media, admins see and route them to departments, and there's an audit trail.
 
 ## Features
 
